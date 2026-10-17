@@ -147,7 +147,7 @@ $('wx').onclick=()=>$('wx').classList.toggle('open');
 
 /* 状態 */
 let st='idle';
-const STL={idle:'待機中',listen:'聞き取り中',think:'考え中',speak:'話しています'};
+const STL={idle:'待機中',listen:'聞き取り中',think:'解析中',speak:'話しています'};
 function setSt(s){
   st=s;stSince=Date.now();$('src').textContent=micOn&&s==='idle'?'聞いています':STL[s];
   $('bk').textContent=micOn?'マイクをOFFにする':'マイクON';
@@ -406,6 +406,41 @@ fillVoices();
 
 $('bt').onclick=()=>{ti=(ti+1)%THN.length;store.set('ti',ti);applyTheme()};
 
+/* 描画: 解析中は、画像のような青白いモヤモヤ（雲）を出す */
+let cloudA=0,spr=null,sprKey='';
+function sprite(c1,c2){
+  const k=c1+c2;if(spr&&sprKey===k)return spr;
+  const c=document.createElement('canvas');c.width=c.height=128;
+  const x=c.getContext('2d'),gr=x.createRadialGradient(64,64,0,64,64,64);
+  gr.addColorStop(0,c2);gr.addColorStop(.35,c1);gr.addColorStop(1,'rgba(0,0,0,0)');
+  x.fillStyle=gr;x.fillRect(0,0,128,128);spr=c;sprKey=k;return c;
+}
+function cloud(cx,cy,t,CR,c1,c2){
+  const sp=sprite(c1,c2);
+  g.save();g.setLineDash([]);g.globalCompositeOperation='lighter';
+  const pulse=1+.06*Math.sin(t*1.3);
+  for(let i=0;i<70;i++){
+    const ph=i*1.618,a=ph*2.4+t*(.12+(i%5)*.03)*(i%2?1:-1);
+    const rr=CR*(.25+((i*53)%100)/100*.95)*pulse;
+    const x=cx+Math.cos(a)*rr*1.1+Math.sin(t*.7+ph)*CR*.06;
+    const y=cy+Math.sin(a)*rr*.85+Math.cos(t*.6+ph*1.3)*CR*.06;
+    const sz=CR*(.28+((i*29)%100)/100*.45);
+    g.globalAlpha=cloudA*(.07+.07*Math.abs(Math.sin(t*.9+ph)));
+    g.drawImage(sp,x-sz/2,y-sz/2,sz,sz);
+  }
+  g.globalCompositeOperation='source-over';g.strokeStyle=c1;g.lineWidth=1;
+  for(let i=0;i<14;i++){
+    const yy=cy-CR*1.1+i*CR*.17,d=Math.sin(t*.5+i)*6;
+    g.globalAlpha=cloudA*.14;g.beginPath();g.moveTo(cx-CR*1.7,yy+d);g.lineTo(cx+CR*1.7,yy-d);g.stroke();
+  }
+  g.fillStyle=c2;
+  for(let i=0;i<50;i++){
+    const a=i*2.17+t*.05,r=CR*(.3+((i*61)%100)/100*1.3);
+    g.globalAlpha=cloudA*(.2+.6*Math.abs(Math.sin(t*2+i)));
+    g.beginPath();g.arc(cx+Math.cos(a)*r,cy+Math.sin(a)*r*.8,1.2,0,7);g.fill();
+  }
+  g.restore();
+}
 /* 描画 */
 function ring(cx,cy,t,r,w,dash,sp,al,col){
   g.save();g.translate(cx,cy);g.rotate(t*sp);g.beginPath();g.arc(0,0,r,0,7);
@@ -423,6 +458,8 @@ function fr(ms_){
   lv+=(tl-lv)*.25;
   const spin=st==='think'?3:1;
   const cx=W/2,cy=H*.37,R=Math.min(W*.4,H*.21),e=Math.min(1,lv+.06+.03*Math.sin(t*1.5));
+  cloudA+=((st==='think'?1:0)-cloudA)*(st==='think'?.06:.04);
+  if(cloudA>.01)cloud(cx,cy,t,Math.min(W*.5,H*.3),c1,c2);
 
   const gr=g.createRadialGradient(cx,cy,0,cx,cy,R*.7);
   gr.addColorStop(0,c2);gr.addColorStop(.3,c1);gr.addColorStop(1,'rgba(0,0,0,0)');
@@ -460,7 +497,7 @@ function fr(ms_){
   }
 
   g.globalAlpha=.9;g.fillStyle=c2;g.font='700 15px ui-monospace,Menlo,monospace';
-  g.textAlign='center';g.textBaseline='middle';g.fillText('O R R E R Y',cx,cy);
+  g.textAlign='center';g.textBaseline='middle';g.fillText(st==='think'?'ANALYZING':'O R R E R Y',cx,cy);
   g.globalAlpha=1;
   requestAnimationFrame(fr);
 }
