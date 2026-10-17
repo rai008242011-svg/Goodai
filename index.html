@@ -39,7 +39,7 @@ button{flex:1;pointer-events:auto;font:inherit;font-size:12px;color:var(--c);bac
 button.talk{flex:1.7;font-size:14px;font-weight:700}
 button:active,button.on{background:var(--c);color:#000}
 #tx button{flex:none;padding:0 16px}
-#vp{display:none;flex-direction:column;gap:8px;font-size:12px}
+#vp{display:none;flex-direction:column;gap:8px;font-size:12px;max-height:46vh;overflow:auto}
 #vp select{font:inherit;font-size:16px;color:var(--c2);background:rgba(0,0,0,.65);border:1px solid var(--c);border-radius:8px;padding:8px}
 #vp label{display:flex;align-items:center;gap:8px}
 #vp input[type=range]{flex:1;accent-color:var(--c)}
@@ -64,13 +64,22 @@ button:active,button.on{background:var(--c);color:#000}
       <label>速さ<input type="range" id="vr" min="0.7" max="1.5" step="0.05"></label>
       <label>高さ<input type="range" id="vt" min="0.5" max="1.5" step="0.05"></label>
       <button id="vtest">試し聞き</button>
+      <div style="border-top:1px solid var(--c);padding-top:8px;opacity:.8">マイクの設定（白い線を超えると、話していると判断します）</div>
+      <div style="position:relative;height:10px;border:1px solid var(--c);border-radius:5px;overflow:hidden"><div id="mbar" style="height:100%;background:var(--c);width:0"></div><div id="mth" style="position:absolute;top:0;bottom:0;width:2px;background:#fff"></div></div>
+      <label>感度<input type="range" id="ss" min="0.4" max="3" step="0.1"></label>
+      <label>割込<input type="range" id="sb" min="0.4" max="3" step="0.1"></label>
+      <label>待ち<input type="range" id="sg" min="0.5" max="2.5" step="0.1"></label>
+      <div style="opacity:.6">感度: 上げると小さい声も拾う／割込: 上げるとAIの話を止めやすい／待ち: 話し終わりと判断するまでの秒数</div>
+      <label><input type="checkbox" id="cn">ノイズ除去</label>
+      <label><input type="checkbox" id="ce">エコー除去</label>
+      <label><input type="checkbox" id="ca">自動音量</label>
+      <button id="sreset">マイク設定を初期値に戻す</button>
     </div>
     <div id="tx"><input id="ti" type="text" placeholder="ここに入力して送信" enterkeyhint="send" autocomplete="off"><button id="ts">送信</button></div>
     <div class="btns">
       <button class="talk" id="bk">話す</button>
       <button id="bx">文字</button>
-      <button id="bg">割込ON</button>
-      <button id="bv">声</button>
+      <button id="bv">設定</button>
       <button id="bt">テーマ</button>
       <button id="bc">地点</button>
     </div>
@@ -155,7 +164,7 @@ function show(kind,text){
 
 /* 会話 */
 const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
-let hist=store.get('hist',[]),spTok=0,hold=0,stSince=Date.now(),barge=store.get('barge',true),vname=store.get('vname',''),vrate=store.get('vrate',1.05),vpitch=store.get('vpitch',1);
+let hist=store.get('hist',[]),spTok=0,hold=0,stSince=Date.now(),vname=store.get('vname',''),vrate=store.get('vrate',1.05),vpitch=store.get('vpitch',1),ns=store.get('ns',true),ec=store.get('ec',true),agc=store.get('agc',true),sens=store.get('sens',1),bsens=store.get('bsens',1),gap=store.get('gap',1),lastRms=0,lastBase=.015,vpOpen=false,turnId=0,carry='',ctl=null;
 function ctx(){
   const d=new Date();
   return '日時 '+d.toLocaleString('ja-JP',{dateStyle:'full',timeStyle:'short'})+(wxs?'、'+wxs:'');
@@ -163,7 +172,8 @@ function ctx(){
 async function post(retry){
   const h={'content-type':'application/json'};
   const pw=store.get('pw','');if(pw)h['x-pass']=pw;
-  const res=await fetch('/api/chat',{method:'POST',headers:h,body:JSON.stringify({messages:hist,context:ctx()})});
+  ctl=new AbortController();
+  const res=await fetch('/api/chat',{method:'POST',headers:h,signal:ctl.signal,body:JSON.stringify({messages:hist,context:ctx()})});
   if(res.status===401&&!retry){
     const p=prompt('合言葉を入力してください');
     if(p){store.set('pw',p);return post(true)}
@@ -173,34 +183,39 @@ async function post(retry){
   if(!res.ok)throw new Error(j.error||('通信エラー '+res.status));
   return j;
 }
+function drop(m){const i=hist.indexOf(m);if(i>=0)hist.splice(i,1)}
 async function ask(text){
+  const my=turnId,msg={role:'user',content:text};
   show('you',text);
-  hist.push({role:'user',content:text});
+  hist.push(msg);
   setSt('think');
   try{
-    const j=await post();const r=j.reply;
+    const j=await post();
+    if(my!==turnId){drop(msg);carry=text;return}
+    const r=j.reply;
     hist.push({role:'assistant',content:r});
     hist=hist.slice(-16);store.set('hist',hist);
     show('ai',r);if(j.model)$('lm').textContent='モデル: '+j.model;
     speak(r);
   }catch(e){
-    hist.pop();setSt('idle');show('sys',String(e.message||e));
+    drop(msg);
+    if(my!==turnId){carry=text;return}
+    setSt('idle');show('sys',String(e.message||e));
   }
 }
 function muteMic(b){if(ms)ms.getAudioTracks().forEach(t=>t.enabled=!b)}
 function resumeAc(){if(ac&&ac.state!=='running')ac.resume().catch(()=>{})}
 function speakDone(my){
   if(my!==spTok)return;
-  hold=performance.now()+700;muteMic(false);resumeAc();setSt('idle');
+  hold=performance.now()+400;muteMic(false);resumeAc();setSt('idle');
 }
-function syncBg(){$('bg').textContent=barge?'割込ON':'割込OFF'}
 function speak(text,retried){
   const syn=window.speechSynthesis;
   if(!syn){setSt('idle');return}
   syn.cancel();const my=++spTok;
   const parts=text.replace(/[*#`_>]/g,'').split(/(?<=[。！？!?\n])/).map(s=>s.trim()).filter(Boolean);
   if(!parts.length){setSt('idle');return}
-  if(!barge)muteMic(true);
+  if(retried)muteMic(true);
   const vs=syn.getVoices().filter(v=>v.lang&&v.lang.replace('_','-').toLowerCase().startsWith('ja'));
   const vv=vs.find(v=>v.name===vname)||vs[0];
   const t0=setTimeout(()=>{
@@ -208,12 +223,11 @@ function speak(text,retried){
     spTok++;try{syn.cancel()}catch(e){}
     muteMic(false);
     if(!retried){
-      barge=false;store.set('barge',false);syncBg();
-      show('sys','読み上げが始まらなかったので、AIが話している間はマイクを止める設定にして、もう一度読み上げます');
+      show('sys','読み上げが始まらなかったので、もう一度読み上げます');
       speak(text,true);
     }else{setSt('idle');show('sys','この端末では読み上げを始められませんでした')}
   },2500);
-  setTimeout(()=>{if(my===spTok&&st!=='idle')speakDone(my)},5000+text.length*400);
+  setTimeout(()=>{if(my===spTok&&st!=='idle')speakDone(my)},3000+text.length*300);
   parts.forEach((p,i)=>{
     const u=new SpeechSynthesisUtterance(p);
     u.lang='ja-JP';u.rate=vrate;u.pitch=vpitch;
@@ -248,7 +262,7 @@ async function micStart(){
   ac=new (window.AudioContext||window.webkitAudioContext)();
   try{ac.resume()}catch(e){}
   try{
-    ms=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true,autoGainControl:true}});
+    ms=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:ec,noiseSuppression:ns,autoGainControl:agc}});
   }catch(e){try{ac.close()}catch(x){}ac=null;show('sys','マイクを使えません。ブラウザのマイク許可を確認してください');return}
   await ac.resume();
   sr=ac.sampleRate;
@@ -256,12 +270,13 @@ async function micStart(){
   an=ac.createAnalyser();an.fftSize=256;an.smoothingTimeConstant=.75;fd=new Uint8Array(an.frequencyBinCount);
   proc=ac.createScriptProcessor(4096,1,1);proc.onaudioprocess=onAudio;
   const mute=ac.createGain();mute.gain.value=0;
-  src.connect(an);src.connect(proc);proc.connect(mute);mute.connect(ac.destination);
+  const hp=ac.createBiquadFilter();hp.type='highpass';hp.frequency.value=100;
+  src.connect(hp);hp.connect(an);hp.connect(proc);proc.connect(mute);mute.connect(ac.destination);
   micOn=true;talking=false;pre=[];buf=[];setSt('idle');
   try{wl=await navigator.wakeLock.request('screen')}catch(e){}
 }
 function micStop(){
-  talking=false;buf=[];pre=[];spTok++;
+  talking=false;buf=[];pre=[];spTok++;turnId++;carry='';if(ctl){try{ctl.abort()}catch(e){}}
   try{speechSynthesis.cancel()}catch(e){}
   if(proc){proc.onaudioprocess=null;try{proc.disconnect()}catch(e){}}
   if(ms)ms.getTracks().forEach(t=>t.stop());
@@ -270,39 +285,44 @@ function micStop(){
   proc=ms=ac=an=fd=wl=null;micOn=false;setSt('idle');
 }
 function onAudio(e){
-  if(st==='think'||performance.now()<hold)return;
   const x=new Float32Array(e.inputBuffer.getChannelData(0));
   let s=0;for(let i=0;i<x.length;i++)s+=x[i]*x[i];
   const rms=Math.sqrt(s/x.length),dur=x.length/sr;
-  const base=Math.max(.015,nf*3);
+  const base=Math.max(.015,nf*3)/sens;
+  lastRms=rms;lastBase=base;
+  if(performance.now()<hold&&rms<base*3)return;
   if(st==='idle'&&!talking&&rms<base)nf=nf*.97+rms*.03;
   const speakingNow=st==='speak';
-  const hi=speakingNow?Math.max(.05,base*2.5):base;
+  const hi=speakingNow?Math.max(.03,base*1.8)/bsens:base;
   if(!talking){
     pre.push(x);if(pre.length>4)pre.shift();
     vHi=rms>hi?vHi+dur:Math.max(0,vHi-dur);
-    if(vHi>=(speakingNow?.35:.12)){
+    if(vHi>=(speakingNow?.25:.12)){
       talking=true;buf=pre.slice();pre=[];vHi=0;vLo=0;
+      turnId++;if(ctl){try{ctl.abort()}catch(e){}ctl=null}
       if(speakingNow){spTok++;try{speechSynthesis.cancel()}catch(e){}}
       setSt('listen');
     }
   }else{
     buf.push(x);
     vLo=rms>base*.7?0:vLo+dur;
-    if(vLo>=1||buf.length*dur>25)finishUtter();
+    if(vLo>=gap||buf.length*dur>20)finishUtter();
   }
 }
 async function finishUtter(){
   talking=false;vLo=0;
-  const ch=buf;buf=[];
+  const my=turnId,ch=buf;buf=[];
   let n=0;ch.forEach(c=>n+=c.length);
-  if(n/sr<.6){setSt('idle');return}
+  if(n/sr<.6){if(carry){const c=carry;carry='';ask(c)}else setSt('idle');return}
   setSt('think');
   try{
     const t=await stt(toWav(ch));
-    if(t.length<2||/ご視聴ありがとう|チャンネル登録/.test(t)){setSt('idle');return}
-    ask(t);
-  }catch(e){setSt('idle');show('sys',String(e.message||e))}
+    const junk=t.length<2||/ご視聴ありがとう|チャンネル登録/.test(t);
+    if(my!==turnId){if(!junk)carry=(carry+' '+t).trim();return}
+    if(junk&&!carry){setSt('idle');return}
+    const full=(carry+' '+(junk?'':t)).trim();carry='';
+    ask(full);
+  }catch(e){if(my===turnId){setSt('idle');show('sys',String(e.message||e))}}
 }
 async function stt(wav,retry){
   const h={'content-type':'application/octet-stream'};
@@ -334,15 +354,17 @@ function toWav(ch){
   return w.buffer;
 }
 $('bk').onclick=()=>micOn?micStop():micStart();
-$('bg').onclick=()=>{barge=!barge;store.set('barge',barge);syncBg()};
 setInterval(()=>{
   if(!micOn)return;
   resumeAc();
   if(ms&&ms.getAudioTracks().some(t=>t.readyState==='ended')){micStop();show('sys','マイクが切れました。もう一度「マイクON」を押してください');return}
   if(st==='think'&&Date.now()-stSince>45000){setSt('idle');show('sys','返事が来なかったので待機に戻しました')}
-},1000);
+  if(st==='speak'&&Date.now()-stSince>1000){const sy=window.speechSynthesis;if(sy&&!sy.speaking&&!sy.pending)speakDone(spTok)}
+  if(st==='listen'&&Date.now()-stSince>30000){talking=false;buf=[];setSt('idle')}
+},300);
+/* 画面中央をタップすると、読み上げや聞き取りを止めて待機に戻す */
+cv.onclick=()=>{if(!micOn)return;turnId++;carry='';if(ctl){try{ctl.abort()}catch(e){}}spTok++;try{speechSynthesis.cancel()}catch(e){}muteMic(false);talking=false;buf=[];pre=[];setSt('idle')};
 document.addEventListener('visibilitychange',resumeAc);
-syncBg();
 
 /* 声の設定 */
 function jaVoices(){return window.speechSynthesis?speechSynthesis.getVoices().filter(v=>v.lang&&v.lang.replace('_','-').toLowerCase().startsWith('ja')):[]}
@@ -362,12 +384,24 @@ function preview(){
   const v=jaVoices().find(x=>x.name===vname)||jaVoices()[0];if(v)u.voice=v;
   syn.speak(u);
 }
-$('bv').onclick=()=>{const p=$('vp');p.style.display=p.style.display==='flex'?'none':'flex';fillVoices()};
+$('bv').onclick=()=>{const p=$('vp');p.style.display=p.style.display==='flex'?'none':'flex';vpOpen=p.style.display==='flex';fillVoices()};
 $('vs').onchange=e=>{vname=e.target.value;store.set('vname',vname);preview()};
 $('vr').oninput=e=>{vrate=+e.target.value;store.set('vrate',vrate)};
 $('vt').oninput=e=>{vpitch=+e.target.value;store.set('vpitch',vpitch)};
 $('vr').value=vrate;$('vt').value=vpitch;
 $('vtest').onclick=preview;
+function applyMic(){
+  if(ms)ms.getAudioTracks().forEach(t=>{try{t.applyConstraints({noiseSuppression:ns,echoCancellation:ec,autoGainControl:agc}).catch(()=>{})}catch(e){}});
+}
+function syncMic(){$('cn').checked=ns;$('ce').checked=ec;$('ca').checked=agc;$('ss').value=sens;$('sb').value=bsens;$('sg').value=gap}
+$('cn').onchange=e=>{ns=e.target.checked;store.set('ns',ns);applyMic()};
+$('ce').onchange=e=>{ec=e.target.checked;store.set('ec',ec);applyMic()};
+$('ca').onchange=e=>{agc=e.target.checked;store.set('agc',agc);applyMic()};
+$('ss').oninput=e=>{sens=+e.target.value;store.set('sens',sens)};
+$('sb').oninput=e=>{bsens=+e.target.value;store.set('bsens',bsens)};
+$('sg').oninput=e=>{gap=+e.target.value;store.set('gap',gap)};
+$('sreset').onclick=()=>{ns=ec=agc=true;sens=bsens=gap=1;['ns','ec','agc'].forEach(k=>store.set(k,true));['sens','bsens','gap'].forEach(k=>store.set(k,1));syncMic();applyMic()};
+syncMic();
 if(window.speechSynthesis)speechSynthesis.onvoiceschanged=fillVoices;
 fillVoices();
 
@@ -392,6 +426,7 @@ function ring(cx,cy,t,r,w,dash,sp,al,col){
 function fr(ms_){
   const t=ms_/1000,[c1,c2]=TH[THN[ti]];
   g.clearRect(0,0,W,H);
+  if(vpOpen){const db=v=>Math.max(0,Math.min(1,(20*Math.log10(Math.max(v,1e-5))+60)/60))*100;$('mbar').style.width=db(lastRms)+'%';$('mth').style.left=db(lastBase)+'%'}
   let tl=0;
   if(an&&(st==='idle'||st==='listen')){an.getByteFrequencyData(fd);let s=0;for(let i=0;i<48;i++)s+=fd[i];tl=Math.min(1,s/48/255*2.2)}
   else if(st==='listen')tl=.25+.2*Math.abs(Math.sin(t*5)*Math.sin(t*2.3));
