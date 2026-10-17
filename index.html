@@ -39,10 +39,10 @@ button{flex:1;pointer-events:auto;font:inherit;font-size:12px;color:var(--c);bac
 button.talk{flex:1.7;font-size:14px;font-weight:700}
 button:active,button.on{background:var(--c);color:#000}
 #tx button{flex:none;padding:0 16px}
-#voicePanel{position:fixed;inset:0;z-index:10;display:none;align-items:center;justify-content:center;padding:18px;background:rgba(0,4,9,.82);backdrop-filter:blur(10px);pointer-events:auto}
-#voicePanel.open{display:flex}.panel{width:min(560px,100%);max-height:86vh;overflow:auto;border:1px solid var(--c);border-radius:16px;background:#061018;color:var(--c2);padding:18px;box-shadow:0 0 35px #00cfff22}
-.panel h2{font-size:17px;margin:0 0 8px}.panel p{font-size:11px;line-height:1.6;opacity:.75}.setting{display:grid;grid-template-columns:1fr auto;gap:8px;align-items:center;padding:10px 0;border-bottom:1px solid #1b4754}.setting label{font-size:13px}.setting output{font-size:12px}.setting select{grid-column:1/-1;width:100%;background:#02090e;color:var(--c2);border:1px solid var(--c);border-radius:8px;padding:10px;font:inherit}.setting input[type=range]{grid-column:1/-1;width:100%;accent-color:var(--c)}.checks{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:12px 0}.checks label{font-size:12px;display:flex;gap:8px;align-items:center}.panelBtns{display:flex;gap:8px;margin-top:14px}.panelBtns button{padding:12px 6px}.smallnote{font-size:10px!important;opacity:.65}
-
+#vp{display:none;flex-direction:column;gap:8px;font-size:12px}
+#vp select{font:inherit;font-size:16px;color:var(--c2);background:rgba(0,0,0,.65);border:1px solid var(--c);border-radius:8px;padding:8px}
+#vp label{display:flex;align-items:center;gap:8px}
+#vp input[type=range]{flex:1;accent-color:var(--c)}
 </style>
 </head>
 <body>
@@ -59,34 +59,21 @@ button:active,button.on{background:var(--c);color:#000}
       <div id="sub"></div>
       <div class="fc" id="fc"></div>
     </div>
+    <div class="wx" id="vp">
+      <select id="vs"></select>
+      <label>速さ<input type="range" id="vr" min="0.7" max="1.5" step="0.05"></label>
+      <label>高さ<input type="range" id="vt" min="0.5" max="1.5" step="0.05"></label>
+      <button id="vtest">試し聞き</button>
+    </div>
     <div id="tx"><input id="ti" type="text" placeholder="ここに入力して送信" enterkeyhint="send" autocomplete="off"><button id="ts">送信</button></div>
     <div class="btns">
       <button class="talk" id="bk">話す</button>
       <button id="bx">文字</button>
       <button id="bg">割込ON</button>
+      <button id="bv">声</button>
       <button id="bt">テーマ</button>
       <button id="bc">地点</button>
-      <button id="bs">音声</button>
     </div>
-  </div>
-</div>
-<div id="voicePanel" role="dialog" aria-modal="true" aria-label="音声設定">
-  <div class="panel">
-    <h2>音声・マイク設定</h2>
-    <p>声の選択は端末とブラウザに搭載された音声に依存します。設定はこの端末に保存されます。</p>
-    <div class="setting"><label for="voiceSelect">読み上げ音声</label><output id="voiceCount">検索中</output><select id="voiceSelect"><option value="">標準音声</option></select></div>
-    <div class="setting"><label for="rate">話す速度</label><output id="rateOut">1.05x</output><input id="rate" type="range" min="0.75" max="1.35" step="0.05" value="1.05"></div>
-    <div class="setting"><label for="pitch">声の高さ</label><output id="pitchOut">1.00</output><input id="pitch" type="range" min="0.7" max="1.4" step="0.05" value="1"></div>
-    <div class="setting"><label for="sensitivity">マイク感度</label><output id="sensitivityOut">標準</output><input id="sensitivity" type="range" min="0.6" max="1.8" step="0.1" value="1"></div>
-    <div class="checks">
-      <label><input id="noiseToggle" type="checkbox" checked> ノイズ抑制</label>
-      <label><input id="echoToggle" type="checkbox" checked> エコーキャンセル</label>
-      <label><input id="gainToggle" type="checkbox" checked> 自動音量調整</label>
-      <label><input id="voiceEnabled" type="checkbox" checked> AI音声読み上げ</label>
-    </div>
-    <p class="smallnote">※ マイクの設定変更は、マイクをいったんOFFにしてから再度ONにすると反映されます。専用AIノイズ除去ではなく、ブラウザ標準の音声処理を使用します。</p>
-    <div class="panelBtns"><button id="voiceTest">テスト再生</button><button id="micTest">マイク確認</button><button id="voiceClose">閉じる</button></div>
-    <p id="micStatus" aria-live="polite"></p>
   </div>
 </div>
 <script>
@@ -168,26 +155,7 @@ function show(kind,text){
 
 /* 会話 */
 const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
-let hist=store.get('hist',[]),spTok=0,hold=0,stSince=Date.now(),barge=store.get('barge',true);
-const audioPrefs=Object.assign({voiceURI:'',rate:1.05,pitch:1,sensitivity:1,noise:true,echo:true,gain:true,enabled:true},store.get('audioPrefs',{}));
-function saveAudioPrefs(){store.set('audioPrefs',audioPrefs)}
-function refreshVoices(){
-  const sel=$('voiceSelect');if(!sel)return;
-  const old=audioPrefs.voiceURI;const all=(window.speechSynthesis?.getVoices?.()||[]).filter(v=>v.lang&&v.lang.replace('_','-').toLowerCase().startsWith('ja'));
-  sel.innerHTML='';const def=document.createElement('option');def.value='';def.textContent='自動（日本語音声）';sel.appendChild(def);
-  all.forEach(v=>{const o=document.createElement('option');o.value=v.voiceURI;o.textContent=v.name+(v.localService?'（端末内）':'');sel.appendChild(o)});
-  sel.value=all.some(v=>v.voiceURI===old)?old:'';$('voiceCount').textContent=all.length+'種類';
-}
-function initAudioPanel(){
-  $('voiceSelect').value=audioPrefs.voiceURI;$('rate').value=audioPrefs.rate;$('pitch').value=audioPrefs.pitch;$('sensitivity').value=audioPrefs.sensitivity;
-  $('noiseToggle').checked=audioPrefs.noise;$('echoToggle').checked=audioPrefs.echo;$('gainToggle').checked=audioPrefs.gain;$('voiceEnabled').checked=audioPrefs.enabled;
-  updateAudioLabels();refreshVoices();
-}
-function updateAudioLabels(){
-  $('rateOut').textContent=Number(audioPrefs.rate).toFixed(2)+'x';$('pitchOut').textContent=Number(audioPrefs.pitch).toFixed(2);
-  const n=Number(audioPrefs.sensitivity);$('sensitivityOut').textContent=n<.9?'低め':n>1.2?'高め':'標準';
-}
-
+let hist=store.get('hist',[]),spTok=0,hold=0,stSince=Date.now(),barge=store.get('barge',true),vname=store.get('vname',''),vrate=store.get('vrate',1.05),vpitch=store.get('vpitch',1);
 function ctx(){
   const d=new Date();
   return '日時 '+d.toLocaleString('ja-JP',{dateStyle:'full',timeStyle:'short'})+(wxs?'、'+wxs:'');
@@ -227,7 +195,6 @@ function speakDone(my){
 }
 function syncBg(){$('bg').textContent=barge?'割込ON':'割込OFF'}
 function speak(text,retried){
-  if(!audioPrefs.enabled){setSt('idle');return}
   const syn=window.speechSynthesis;
   if(!syn){setSt('idle');return}
   syn.cancel();const my=++spTok;
@@ -235,7 +202,7 @@ function speak(text,retried){
   if(!parts.length){setSt('idle');return}
   if(!barge)muteMic(true);
   const vs=syn.getVoices().filter(v=>v.lang&&v.lang.replace('_','-').toLowerCase().startsWith('ja'));
-  const selected=vs.find(v=>v.voiceURI===audioPrefs.voiceURI)||vs[0];
+  const vv=vs.find(v=>v.name===vname)||vs[0];
   const t0=setTimeout(()=>{
     if(my!==spTok||st!=='think')return;
     spTok++;try{syn.cancel()}catch(e){}
@@ -249,8 +216,8 @@ function speak(text,retried){
   setTimeout(()=>{if(my===spTok&&st!=='idle')speakDone(my)},5000+text.length*400);
   parts.forEach((p,i)=>{
     const u=new SpeechSynthesisUtterance(p);
-    u.lang='ja-JP';u.rate=Number(audioPrefs.rate)||1.05;u.pitch=Number(audioPrefs.pitch)||1;
-    if(selected)u.voice=selected;
+    u.lang='ja-JP';u.rate=vrate;u.pitch=vpitch;
+    if(vv)u.voice=vv;
     if(i===0)u.onstart=()=>{if(my===spTok){clearTimeout(t0);setSt('speak')}};
     if(i===parts.length-1)u.onend=()=>speakDone(my);
     u.onerror=()=>{if(i===parts.length-1)speakDone(my)};
@@ -281,7 +248,7 @@ async function micStart(){
   ac=new (window.AudioContext||window.webkitAudioContext)();
   try{ac.resume()}catch(e){}
   try{
-    ms=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:audioPrefs.echo,noiseSuppression:audioPrefs.noise,autoGainControl:audioPrefs.gain,channelCount:1}});
+    ms=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true,autoGainControl:true}});
   }catch(e){try{ac.close()}catch(x){}ac=null;show('sys','マイクを使えません。ブラウザのマイク許可を確認してください');return}
   await ac.resume();
   sr=ac.sampleRate;
@@ -307,7 +274,7 @@ function onAudio(e){
   const x=new Float32Array(e.inputBuffer.getChannelData(0));
   let s=0;for(let i=0;i<x.length;i++)s+=x[i]*x[i];
   const rms=Math.sqrt(s/x.length),dur=x.length/sr;
-  const base=Math.max(.008,nf*3)/Math.max(.6,Math.min(1.8,Number(audioPrefs.sensitivity)||1));
+  const base=Math.max(.015,nf*3);
   if(st==='idle'&&!talking&&rms<base)nf=nf*.97+rms*.03;
   const speakingNow=st==='speak';
   const hi=speakingNow?Math.max(.05,base*2.5):base;
@@ -368,21 +335,6 @@ function toWav(ch){
 }
 $('bk').onclick=()=>micOn?micStop():micStart();
 $('bg').onclick=()=>{barge=!barge;store.set('barge',barge);syncBg()};
-$('bs').onclick=()=>{$('voicePanel').classList.add('open');initAudioPanel()};
-$('voiceClose').onclick=()=>$('voicePanel').classList.remove('open');
-$('voicePanel').addEventListener('click',e=>{if(e.target===$('voicePanel'))$('voicePanel').classList.remove('open')});
-$('voiceSelect').onchange=()=>{audioPrefs.voiceURI=$('voiceSelect').value;saveAudioPrefs()};
-$('rate').oninput=()=>{audioPrefs.rate=Number($('rate').value);updateAudioLabels();saveAudioPrefs()};
-$('pitch').oninput=()=>{audioPrefs.pitch=Number($('pitch').value);updateAudioLabels();saveAudioPrefs()};
-$('sensitivity').oninput=()=>{audioPrefs.sensitivity=Number($('sensitivity').value);updateAudioLabels();saveAudioPrefs()};
-$('noiseToggle').onchange=()=>{audioPrefs.noise=$('noiseToggle').checked;saveAudioPrefs()};
-$('echoToggle').onchange=()=>{audioPrefs.echo=$('echoToggle').checked;saveAudioPrefs()};
-$('gainToggle').onchange=()=>{audioPrefs.gain=$('gainToggle').checked;saveAudioPrefs()};
-$('voiceEnabled').onchange=()=>{audioPrefs.enabled=$('voiceEnabled').checked;saveAudioPrefs();if(!audioPrefs.enabled){try{speechSynthesis.cancel()}catch(e){}}};
-$('voiceTest').onclick=()=>{try{speechSynthesis.cancel();const u=new SpeechSynthesisUtterance('こんにちは。音声設定のテストです。聞き取りやすいですか？');u.lang='ja-JP';u.rate=Number(audioPrefs.rate);u.pitch=Number(audioPrefs.pitch);const vv=speechSynthesis.getVoices().find(v=>v.voiceURI===audioPrefs.voiceURI)||speechSynthesis.getVoices().find(v=>v.lang&&v.lang.toLowerCase().startsWith('ja'));if(vv)u.voice=vv;speechSynthesis.speak(u);$('micStatus').textContent='音声テストを再生しています。'}catch(e){$('micStatus').textContent='音声を再生できませんでした。ブラウザの対応状況を確認してください。'}};
-$('micTest').onclick=async()=>{if(!navigator.mediaDevices?.getUserMedia){$('micStatus').textContent='このブラウザではマイク機能を利用できません。HTTPSで開いてください。';return}try{const test=await navigator.mediaDevices.getUserMedia({audio:{noiseSuppression:audioPrefs.noise,echoCancellation:audioPrefs.echo,autoGainControl:audioPrefs.gain}});const track=test.getAudioTracks()[0];const settings=track.getSettings?track.getSettings():{};$('micStatus').textContent='マイクは使用可能です。'+(settings.sampleRate?' サンプルレート '+settings.sampleRate+'Hz。':'')+' 設定変更はマイクを再起動すると反映されます。';test.getTracks().forEach(t=>t.stop())}catch(e){$('micStatus').textContent='マイクを利用できません。ブラウザのマイク許可とHTTPS接続を確認してください。'}};
-if(window.speechSynthesis){speechSynthesis.addEventListener?.('voiceschanged',refreshVoices);setTimeout(refreshVoices,300)}
-
 setInterval(()=>{
   if(!micOn)return;
   resumeAc();
@@ -391,6 +343,33 @@ setInterval(()=>{
 },1000);
 document.addEventListener('visibilitychange',resumeAc);
 syncBg();
+
+/* 声の設定 */
+function jaVoices(){return window.speechSynthesis?speechSynthesis.getVoices().filter(v=>v.lang&&v.lang.replace('_','-').toLowerCase().startsWith('ja')):[]}
+function fillVoices(){
+  const vs=jaVoices(),sel=$('vs');
+  sel.textContent='';
+  if(!vs.length){const o=document.createElement('option');o.value='';o.textContent='日本語の声が見つかりません';sel.appendChild(o);return}
+  vs.forEach(v=>{const o=document.createElement('option');o.value=v.name;o.textContent=v.name;sel.appendChild(o)});
+  sel.value=vs.some(v=>v.name===vname)?vname:vs[0].name;
+}
+function preview(){
+  const syn=window.speechSynthesis;if(!syn)return;
+  if(st==='speak'){setSt('idle');muteMic(false)}
+  spTok++;syn.cancel();hold=performance.now()+5000;
+  const u=new SpeechSynthesisUtterance('こんにちは。この声でお話しします。');
+  u.lang='ja-JP';u.rate=vrate;u.pitch=vpitch;
+  const v=jaVoices().find(x=>x.name===vname)||jaVoices()[0];if(v)u.voice=v;
+  syn.speak(u);
+}
+$('bv').onclick=()=>{const p=$('vp');p.style.display=p.style.display==='flex'?'none':'flex';fillVoices()};
+$('vs').onchange=e=>{vname=e.target.value;store.set('vname',vname);preview()};
+$('vr').oninput=e=>{vrate=+e.target.value;store.set('vrate',vrate)};
+$('vt').oninput=e=>{vpitch=+e.target.value;store.set('vpitch',vpitch)};
+$('vr').value=vrate;$('vt').value=vpitch;
+$('vtest').onclick=preview;
+if(window.speechSynthesis)speechSynthesis.onvoiceschanged=fillVoices;
+fillVoices();
 
 $('bt').onclick=()=>{ti=(ti+1)%THN.length;store.set('ti',ti);applyTheme()};
 $('bc').onclick=()=>{
@@ -463,7 +442,6 @@ function fr(ms_){
   requestAnimationFrame(fr);
 }
 if(window.speechSynthesis)speechSynthesis.getVoices();
-initAudioPanel();
 if(hist.length&&hist[hist.length-1].role==='user')hist.pop();
 applyTheme();setSt('idle');weather();setInterval(weather,600000);requestAnimationFrame(fr);
 </script>
