@@ -60,6 +60,8 @@ button:active,button.on{background:var(--c);color:#000}
       <div class="fc" id="fc"></div>
     </div>
     <div class="wx" id="vp">
+      <label>声<select id="gv"><option>Kore</option><option>Puck</option><option>Zephyr</option><option>Charon</option><option>Leda</option><option>Aoede</option><option>Fenrir</option><option>Orus</option></select></label>
+      <div style="opacity:.6">予備の声（iPad内蔵。クラウドの声が使えないときに使います）</div>
       <select id="vs"></select>
       <label>速さ<input type="range" id="vr" min="0.7" max="1.5" step="0.05"></label>
       <label>高さ<input type="range" id="vt" min="0.5" max="1.5" step="0.05"></label>
@@ -163,7 +165,7 @@ function show(kind,text){
 
 /* 会話 */
 const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
-let hist=store.get('hist',[]),spTok=0,hold=0,stSince=Date.now(),vname=store.get('vname',''),vrate=store.get('vrate',1.05),vpitch=store.get('vpitch',1),ns=store.get('ns',true),ec=store.get('ec',true),agc=store.get('agc',true),sens=store.get('sens',1),bsens=store.get('bsens',1),gap=store.get('gap',1),lastRms=0,lastBase=.015,vpOpen=false,turnId=0,carry='',ctl=null;
+let hist=store.get('hist',[]),spTok=0,hold=0,stSince=Date.now(),vname=store.get('vname',''),vrate=store.get('vrate',1.05),vpitch=store.get('vpitch',1),ns=store.get('ns',true),ec=store.get('ec',true),agc=store.get('agc',true),sens=store.get('sens',1),bsens=store.get('bsens',1),gap=store.get('gap',1),lastRms=0,lastBase=.015,vpOpen=false,turnId=0,carry='',ctl=null,curSrc=[],cloudTts=true,cloudBusy=0,cloudFail=0,gvoice=store.get('gvoice','Kore');
 function ctx(){
   const d=new Date();
   return '日時 '+d.toLocaleString('ja-JP',{dateStyle:'full',timeStyle:'short'})+(wxs?'、'+wxs:'');
@@ -202,13 +204,57 @@ async function ask(text){
     setSt('idle');show('sys',String(e.message||e));
   }
 }
+function stopAudio(){curSrc.forEach(x=>{try{x.stop()}catch(e){}});curSrc=[]}
+async function ttsFetch(txt){
+  const h={'content-type':'application/json'};const pw=store.get('pw','');if(pw)h['x-pass']=pw;
+  const r=await fetch('/api/tts',{method:'POST',headers:h,body:JSON.stringify({text:txt,voice:gvoice})});
+  const j=await r.json().catch(()=>({}));
+  if(!r.ok)throw new Error(j.error||('音声合成エラー '+r.status));
+  const bin=atob(j.pcm),n=bin.length>>1,f=new Float32Array(n);
+  for(let i=0;i<n;i++){let v=bin.charCodeAt(2*i)|(bin.charCodeAt(2*i+1)<<8);if(v>=32768)v-=65536;f[i]=v/32768}
+  return{f,rate:j.rate||24000};
+}
+async function speakCloud(text,my){
+  if(!ac)throw new Error('マイクがOFF');
+  cloudBusy++;
+  try{
+    const parts=text.replace(/[*#`_>]/g,'').split(/(?<=[。！？!?\n])/).map(x=>x.trim()).filter(Boolean);
+    if(!parts.length){speakDone(my);return}
+    const chunks=parts.length>1?[parts[0],parts.slice(1).join('')]:parts;
+    const ps=chunks.map(c=>{const p=ttsFetch(c);p.catch(()=>{});return p});
+    let t=0,started=false;
+    for(let i=0;i<ps.length;i++){
+      let d;try{d=await ps[i]}catch(e){if(!started)throw e;break}
+      if(my!==spTok)return;
+      const b=ac.createBuffer(1,d.f.length,d.rate);b.copyToChannel(d.f,0);
+      const src=ac.createBufferSource();src.buffer=b;src.connect(ac.destination);
+      const when=Math.max(ac.currentTime+.05,t);src.start(when);t=when+b.duration;curSrc.push(src);
+      if(!started){started=true;cloudFail=0;setSt('speak')}
+    }
+    while(my===spTok&&ac&&ac.currentTime<t-.02)await new Promise(r=>setTimeout(r,100));
+    speakDone(my);
+  }finally{cloudBusy--}
+}
+function speak(text,retried){
+  if(cloudTts&&ac&&!retried){
+    stopAudio();const my=++spTok;
+    speakCloud(text,my).catch(e=>{
+      if(my!==spTok)return;
+      if(++cloudFail>=2)cloudTts=false;
+      show('sys','クラウドの声が使えなかったので、iPadの声で読み上げます（'+String(e.message||e)+'）');
+      speakLocal(text);
+    });
+    return;
+  }
+  speakLocal(text,retried);
+}
 function muteMic(b){if(ms)ms.getAudioTracks().forEach(t=>t.enabled=!b)}
 function resumeAc(){if(ac&&ac.state!=='running')ac.resume().catch(()=>{})}
 function speakDone(my){
   if(my!==spTok)return;
   hold=performance.now()+400;muteMic(false);resumeAc();setSt('idle');
 }
-function speak(text,retried){
+function speakLocal(text,retried){
   const syn=window.speechSynthesis;
   if(!syn){setSt('idle');return}
   syn.cancel();const my=++spTok;
@@ -223,7 +269,7 @@ function speak(text,retried){
     muteMic(false);
     if(!retried){
       show('sys','読み上げが始まらなかったので、もう一度読み上げます');
-      speak(text,true);
+      speakLocal(text,true);
     }else{setSt('idle');show('sys','この端末では読み上げを始められませんでした')}
   },2500);
   setTimeout(()=>{if(my===spTok&&st!=='idle')speakDone(my)},3000+text.length*300);
@@ -299,7 +345,7 @@ function onAudio(e){
     if(vHi>=(speakingNow?.25:.12)){
       talking=true;buf=pre.slice();pre=[];vHi=0;vLo=0;
       turnId++;if(ctl){try{ctl.abort()}catch(e){}ctl=null}
-      if(speakingNow){spTok++;try{speechSynthesis.cancel()}catch(e){}}
+      spTok++;try{speechSynthesis.cancel()}catch(e){}
       setSt('listen');
     }
   }else{
@@ -358,7 +404,7 @@ setInterval(()=>{
   resumeAc();
   if(ms&&ms.getAudioTracks().some(t=>t.readyState==='ended')){micStop();show('sys','マイクが切れました。もう一度「マイクON」を押してください');return}
   if(st==='think'&&Date.now()-stSince>45000){setSt('idle');show('sys','返事が来なかったので待機に戻しました')}
-  if(st==='speak'&&Date.now()-stSince>1000){const sy=window.speechSynthesis;if(sy&&!sy.speaking&&!sy.pending)speakDone(spTok)}
+  if(st==='speak'&&!cloudBusy&&Date.now()-stSince>1000){const sy=window.speechSynthesis;if(sy&&!sy.speaking&&!sy.pending)speakDone(spTok)}
   if(st==='listen'&&Date.now()-stSince>30000){talking=false;buf=[];setSt('idle')}
 },300);
 /* 画面中央をタップすると、読み上げや聞き取りを止めて待機に戻す */
@@ -378,6 +424,7 @@ function preview(){
   const syn=window.speechSynthesis;if(!syn)return;
   if(st==='speak'){setSt('idle');muteMic(false)}
   spTok++;syn.cancel();hold=performance.now()+5000;
+  if(cloudTts&&ac){const my=++spTok;speakCloud('こんにちは。この声でお話しします。',my).catch(()=>{});return}
   const u=new SpeechSynthesisUtterance('こんにちは。この声でお話しします。');
   u.lang='ja-JP';u.rate=vrate;u.pitch=vpitch;
   const v=jaVoices().find(x=>x.name===vname)||jaVoices()[0];if(v)u.voice=v;
@@ -389,6 +436,8 @@ $('vr').oninput=e=>{vrate=+e.target.value;store.set('vrate',vrate)};
 $('vt').oninput=e=>{vpitch=+e.target.value;store.set('vpitch',vpitch)};
 $('vr').value=vrate;$('vt').value=vpitch;
 $('vtest').onclick=preview;
+$('gv').value=gvoice;
+$('gv').onchange=e=>{gvoice=e.target.value;store.set('gvoice',gvoice);preview()};
 function applyMic(){
   if(ms)ms.getAudioTracks().forEach(t=>{try{t.applyConstraints({noiseSuppression:ns,echoCancellation:ec,autoGainControl:agc}).catch(()=>{})}catch(e){}});
 }
@@ -401,7 +450,7 @@ $('sb').oninput=e=>{bsens=+e.target.value;store.set('bsens',bsens)};
 $('sg').oninput=e=>{gap=+e.target.value;store.set('gap',gap)};
 $('sreset').onclick=()=>{ns=ec=agc=true;sens=bsens=gap=1;['ns','ec','agc'].forEach(k=>store.set(k,true));['sens','bsens','gap'].forEach(k=>store.set(k,1));syncMic();applyMic()};
 syncMic();
-if(window.speechSynthesis)speechSynthesis.onvoiceschanged=fillVoices;
+if(window.speechSynthesis){speechSynthesis.onvoiceschanged=fillVoices;const _c=speechSynthesis.cancel.bind(speechSynthesis);speechSynthesis.cancel=()=>{stopAudio();_c()}}
 fillVoices();
 
 $('bt').onclick=()=>{ti=(ti+1)%THN.length;store.set('ti',ti);applyTheme()};
