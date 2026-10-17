@@ -1,0 +1,471 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="ORRERY">
+<meta name="theme-color" content="#02060a">
+<title>ORRERY</title>
+<style>
+:root{--c:#33ddff;--c2:#a0f0ff}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;height:100%;background:#02060a;color:var(--c);font-family:ui-monospace,Menlo,"Hiragino Sans",monospace;overflow:hidden;touch-action:manipulation;-webkit-user-select:none;user-select:none}
+canvas{position:fixed;inset:0;width:100%;height:100%}
+.ui{position:fixed;inset:0;display:flex;flex-direction:column;justify-content:space-between;padding:calc(env(safe-area-inset-top,0px) + 12px) 16px calc(env(safe-area-inset-bottom,0px) + 14px);pointer-events:none}
+#clock{font-size:32px;font-weight:700;letter-spacing:.06em;color:var(--c2);text-shadow:0 0 14px var(--c)}
+#date,#src,#cname{font-size:12px;opacity:.75;letter-spacing:.06em}
+.top{display:flex;justify-content:space-between;align-items:flex-start}
+.top .r{text-align:right}
+.bot{display:flex;flex-direction:column;gap:8px}
+#log{max-height:22vh;overflow:auto;border:1px solid var(--c);border-radius:12px;background:rgba(0,0,0,.6);padding:8px 12px;font-size:13px;line-height:1.5;pointer-events:auto;display:none;-webkit-user-select:text;user-select:text}
+#log .y{opacity:.65}
+#log .a{color:var(--c2)}
+#log .s{color:#ff8a8a}
+.wx{border:1px solid var(--c);border-radius:12px;background:rgba(0,0,0,.45);padding:8px 12px;pointer-events:auto}
+.now{display:flex;justify-content:space-between;align-items:baseline}
+#tmp{font-size:22px;font-weight:700;color:var(--c2)}
+#lbl,#sub{font-size:12px}
+#sub{opacity:.7}
+.fc{display:none;grid-template-columns:repeat(4,1fr);gap:6px;font-size:11px;text-align:center;border-top:1px solid var(--c);padding-top:8px;margin-top:6px}
+.wx.open .fc{display:grid}
+.fc b{display:block;font-weight:400;opacity:.7}
+#tx{display:none;gap:8px;pointer-events:auto}
+#tx input{flex:1;font:inherit;font-size:16px;color:var(--c2);background:rgba(0,0,0,.65);border:1px solid var(--c);border-radius:10px;padding:10px 12px;outline:none;-webkit-user-select:text;user-select:text}
+.btns{display:flex;gap:6px}
+button{flex:1;pointer-events:auto;font:inherit;font-size:12px;color:var(--c);background:rgba(0,0,0,.5);border:1px solid var(--c);border-radius:10px;padding:13px 0}
+button.talk{flex:1.7;font-size:14px;font-weight:700}
+button:active,button.on{background:var(--c);color:#000}
+#tx button{flex:none;padding:0 16px}
+#voicePanel{position:fixed;inset:0;z-index:10;display:none;align-items:center;justify-content:center;padding:18px;background:rgba(0,4,9,.82);backdrop-filter:blur(10px);pointer-events:auto}
+#voicePanel.open{display:flex}.panel{width:min(560px,100%);max-height:86vh;overflow:auto;border:1px solid var(--c);border-radius:16px;background:#061018;color:var(--c2);padding:18px;box-shadow:0 0 35px #00cfff22}
+.panel h2{font-size:17px;margin:0 0 8px}.panel p{font-size:11px;line-height:1.6;opacity:.75}.setting{display:grid;grid-template-columns:1fr auto;gap:8px;align-items:center;padding:10px 0;border-bottom:1px solid #1b4754}.setting label{font-size:13px}.setting output{font-size:12px}.setting select{grid-column:1/-1;width:100%;background:#02090e;color:var(--c2);border:1px solid var(--c);border-radius:8px;padding:10px;font:inherit}.setting input[type=range]{grid-column:1/-1;width:100%;accent-color:var(--c)}.checks{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:12px 0}.checks label{font-size:12px;display:flex;gap:8px;align-items:center}.panelBtns{display:flex;gap:8px;margin-top:14px}.panelBtns button{padding:12px 6px}.smallnote{font-size:10px!important;opacity:.65}
+
+</style>
+</head>
+<body>
+<canvas id="cv"></canvas>
+<div class="ui">
+  <div class="top">
+    <div><div id="clock">--:--:--</div><div id="date"></div></div>
+    <div class="r"><div id="src">待機中</div><div id="cname"></div></div>
+  </div>
+  <div class="bot">
+    <div id="log"><div class="y" id="ly"></div><div class="a" id="la"></div><div id="lm" style="opacity:.45;font-size:11px"></div><div class="s" id="ls"></div></div>
+    <div class="wx" id="wx">
+      <div class="now"><span id="tmp">--°</span><span id="lbl">取得中</span></div>
+      <div id="sub"></div>
+      <div class="fc" id="fc"></div>
+    </div>
+    <div id="tx"><input id="ti" type="text" placeholder="ここに入力して送信" enterkeyhint="send" autocomplete="off"><button id="ts">送信</button></div>
+    <div class="btns">
+      <button class="talk" id="bk">話す</button>
+      <button id="bx">文字</button>
+      <button id="bg">割込ON</button>
+      <button id="bt">テーマ</button>
+      <button id="bc">地点</button>
+      <button id="bs">音声</button>
+    </div>
+  </div>
+</div>
+<div id="voicePanel" role="dialog" aria-modal="true" aria-label="音声設定">
+  <div class="panel">
+    <h2>音声・マイク設定</h2>
+    <p>声の選択は端末とブラウザに搭載された音声に依存します。設定はこの端末に保存されます。</p>
+    <div class="setting"><label for="voiceSelect">読み上げ音声</label><output id="voiceCount">検索中</output><select id="voiceSelect"><option value="">標準音声</option></select></div>
+    <div class="setting"><label for="rate">話す速度</label><output id="rateOut">1.05x</output><input id="rate" type="range" min="0.75" max="1.35" step="0.05" value="1.05"></div>
+    <div class="setting"><label for="pitch">声の高さ</label><output id="pitchOut">1.00</output><input id="pitch" type="range" min="0.7" max="1.4" step="0.05" value="1"></div>
+    <div class="setting"><label for="sensitivity">マイク感度</label><output id="sensitivityOut">標準</output><input id="sensitivity" type="range" min="0.6" max="1.8" step="0.1" value="1"></div>
+    <div class="checks">
+      <label><input id="noiseToggle" type="checkbox" checked> ノイズ抑制</label>
+      <label><input id="echoToggle" type="checkbox" checked> エコーキャンセル</label>
+      <label><input id="gainToggle" type="checkbox" checked> 自動音量調整</label>
+      <label><input id="voiceEnabled" type="checkbox" checked> AI音声読み上げ</label>
+    </div>
+    <p class="smallnote">※ マイクの設定変更は、マイクをいったんOFFにしてから再度ONにすると反映されます。専用AIノイズ除去ではなく、ブラウザ標準の音声処理を使用します。</p>
+    <div class="panelBtns"><button id="voiceTest">テスト再生</button><button id="micTest">マイク確認</button><button id="voiceClose">閉じる</button></div>
+    <p id="micStatus" aria-live="polite"></p>
+  </div>
+</div>
+<script>
+const TH={ARC:['#33ddff','#a0f0ff'],EMBER:['#ff8a2a','#ffd49a'],MATRIX:['#2dff6a','#b8ffcc'],CRIMSON:['#ff2d55','#ffa0b2'],MONO:['#e6e6e6','#ffffff']};
+const THN=Object.keys(TH);
+const CITY=[['TOKYO',35.68,139.69],['OSAKA',34.69,135.5],['NAGOYA',35.18,136.91],['SAPPORO',43.06,141.35],['FUKUOKA',33.59,130.4]];
+const $=id=>document.getElementById(id);
+const store={
+  get(k,d){try{const v=localStorage.getItem(k);return v===null?d:JSON.parse(v)}catch(e){return d}},
+  set(k,v){try{localStorage.setItem(k,JSON.stringify(v))}catch(e){}}
+};
+let ti=store.get('ti',0)%THN.length, ci=store.get('ci',0), geo=store.get('geo',null);
+if(ci>CITY.length||(ci===CITY.length&&!geo))ci=0;
+
+function applyTheme(){
+  const [a,b]=TH[THN[ti]];
+  document.documentElement.style.setProperty('--c',a);
+  document.documentElement.style.setProperty('--c2',b);
+  $('bt').textContent=THN[ti];
+}
+function place(){return ci<CITY.length?CITY[ci]:['現在地',geo[0],geo[1]]}
+
+/* 時計 */
+function tick(){
+  const d=new Date(),p=n=>String(n).padStart(2,'0');
+  $('clock').textContent=p(d.getHours())+':'+p(d.getMinutes())+':'+p(d.getSeconds());
+  $('date').textContent=d.toLocaleDateString('ja-JP',{year:'numeric',month:'long',day:'numeric',weekday:'short'});
+}
+setInterval(tick,1000);tick();
+
+/* 天気 (Open-Meteo) */
+let wxs='';
+function wx(c){
+  if(c===0)return'快晴';if(c<=2)return'晴れ';if(c===3)return'くもり';if(c<=48)return'霧';
+  if(c<=57)return'霧雨';if(c<=67)return'雨';if(c<=77)return'雪';if(c<=82)return'にわか雨';
+  if(c<=86)return'にわか雪';return'雷雨';
+}
+async function weather(){
+  const [n,la,lo]=place();
+  $('cname').textContent=n;
+  try{
+    const u='https://api.open-meteo.com/v1/forecast?latitude='+la+'&longitude='+lo+
+      '&current=temperature_2m,weather_code,wind_speed_10m,relative_humidity_2m'+
+      '&daily=weather_code,temperature_2m_max,temperature_2m_min&timezone=auto&forecast_days=5';
+    const r=await fetch(u);if(!r.ok)throw new Error(r.status);
+    const j=await r.json(),c=j.current;
+    $('tmp').textContent=Math.round(c.temperature_2m)+'°C';
+    $('lbl').textContent=wx(c.weather_code);
+    $('sub').textContent='湿度 '+c.relative_humidity_2m+'%  風 '+c.wind_speed_10m+'km/h  （タップで予報）';
+    wxs='天気 '+n+' '+Math.round(c.temperature_2m)+'度 '+wx(c.weather_code);
+    let h='';
+    for(let i=1;i<5;i++){
+      const w=new Date(j.daily.time[i]+'T00:00').toLocaleDateString('ja-JP',{weekday:'short'});
+      h+='<div><b>'+w+'</b>'+wx(j.daily.weather_code[i])+'<br>'+Math.round(j.daily.temperature_2m_max[i])+'/'+Math.round(j.daily.temperature_2m_min[i])+'°</div>';
+    }
+    $('fc').innerHTML=h;
+  }catch(e){
+    $('tmp').textContent='--°';$('lbl').textContent='取得失敗';
+    $('sub').textContent='通信を確認して、地点ボタンで再取得してください';wxs='';
+  }
+}
+$('wx').onclick=()=>$('wx').classList.toggle('open');
+
+/* 状態 */
+let st='idle';
+const STL={idle:'待機中',listen:'聞き取り中',think:'考え中',speak:'話しています'};
+function setSt(s){
+  st=s;stSince=Date.now();$('src').textContent=micOn&&s==='idle'?'聞いています':STL[s];
+  $('bk').textContent=micOn?'マイクをOFFにする':'マイクON';
+  $('bk').classList.toggle('on',micOn);
+}
+function show(kind,text){
+  $('log').style.display='block';
+  if(kind==='you'){$('ly').textContent='あなた: '+text;$('la').textContent='';$('ls').textContent='';$('lm').textContent=''}
+  else if(kind==='ai'){$('la').textContent='ORRERY: '+text}
+  else{$('ls').textContent=text}
+  $('log').scrollTop=$('log').scrollHeight;
+}
+
+/* 会話 */
+const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
+let hist=store.get('hist',[]),spTok=0,hold=0,stSince=Date.now(),barge=store.get('barge',true);
+const audioPrefs=Object.assign({voiceURI:'',rate:1.05,pitch:1,sensitivity:1,noise:true,echo:true,gain:true,enabled:true},store.get('audioPrefs',{}));
+function saveAudioPrefs(){store.set('audioPrefs',audioPrefs)}
+function refreshVoices(){
+  const sel=$('voiceSelect');if(!sel)return;
+  const old=audioPrefs.voiceURI;const all=(window.speechSynthesis?.getVoices?.()||[]).filter(v=>v.lang&&v.lang.replace('_','-').toLowerCase().startsWith('ja'));
+  sel.innerHTML='';const def=document.createElement('option');def.value='';def.textContent='自動（日本語音声）';sel.appendChild(def);
+  all.forEach(v=>{const o=document.createElement('option');o.value=v.voiceURI;o.textContent=v.name+(v.localService?'（端末内）':'');sel.appendChild(o)});
+  sel.value=all.some(v=>v.voiceURI===old)?old:'';$('voiceCount').textContent=all.length+'種類';
+}
+function initAudioPanel(){
+  $('voiceSelect').value=audioPrefs.voiceURI;$('rate').value=audioPrefs.rate;$('pitch').value=audioPrefs.pitch;$('sensitivity').value=audioPrefs.sensitivity;
+  $('noiseToggle').checked=audioPrefs.noise;$('echoToggle').checked=audioPrefs.echo;$('gainToggle').checked=audioPrefs.gain;$('voiceEnabled').checked=audioPrefs.enabled;
+  updateAudioLabels();refreshVoices();
+}
+function updateAudioLabels(){
+  $('rateOut').textContent=Number(audioPrefs.rate).toFixed(2)+'x';$('pitchOut').textContent=Number(audioPrefs.pitch).toFixed(2);
+  const n=Number(audioPrefs.sensitivity);$('sensitivityOut').textContent=n<.9?'低め':n>1.2?'高め':'標準';
+}
+
+function ctx(){
+  const d=new Date();
+  return '日時 '+d.toLocaleString('ja-JP',{dateStyle:'full',timeStyle:'short'})+(wxs?'、'+wxs:'');
+}
+async function post(retry){
+  const h={'content-type':'application/json'};
+  const pw=store.get('pw','');if(pw)h['x-pass']=pw;
+  const res=await fetch('/api/chat',{method:'POST',headers:h,body:JSON.stringify({messages:hist,context:ctx()})});
+  if(res.status===401&&!retry){
+    const p=prompt('合言葉を入力してください');
+    if(p){store.set('pw',p);return post(true)}
+  }
+  if(res.status===404)throw new Error('サーバー側（api/chat.js）が見つかりません。Vercelに公開して開いてください');
+  const j=await res.json().catch(()=>({}));
+  if(!res.ok)throw new Error(j.error||('通信エラー '+res.status));
+  return j;
+}
+async function ask(text){
+  show('you',text);
+  hist.push({role:'user',content:text});
+  setSt('think');
+  try{
+    const j=await post();const r=j.reply;
+    hist.push({role:'assistant',content:r});
+    hist=hist.slice(-16);store.set('hist',hist);
+    show('ai',r);if(j.model)$('lm').textContent='モデル: '+j.model;
+    speak(r);
+  }catch(e){
+    hist.pop();setSt('idle');show('sys',String(e.message||e));
+  }
+}
+function muteMic(b){if(ms)ms.getAudioTracks().forEach(t=>t.enabled=!b)}
+function resumeAc(){if(ac&&ac.state!=='running')ac.resume().catch(()=>{})}
+function speakDone(my){
+  if(my!==spTok)return;
+  hold=performance.now()+700;muteMic(false);resumeAc();setSt('idle');
+}
+function syncBg(){$('bg').textContent=barge?'割込ON':'割込OFF'}
+function speak(text,retried){
+  if(!audioPrefs.enabled){setSt('idle');return}
+  const syn=window.speechSynthesis;
+  if(!syn){setSt('idle');return}
+  syn.cancel();const my=++spTok;
+  const parts=text.replace(/[*#`_>]/g,'').split(/(?<=[。！？!?\n])/).map(s=>s.trim()).filter(Boolean);
+  if(!parts.length){setSt('idle');return}
+  if(!barge)muteMic(true);
+  const vs=syn.getVoices().filter(v=>v.lang&&v.lang.replace('_','-').toLowerCase().startsWith('ja'));
+  const selected=vs.find(v=>v.voiceURI===audioPrefs.voiceURI)||vs[0];
+  const t0=setTimeout(()=>{
+    if(my!==spTok||st!=='think')return;
+    spTok++;try{syn.cancel()}catch(e){}
+    muteMic(false);
+    if(!retried){
+      barge=false;store.set('barge',false);syncBg();
+      show('sys','読み上げが始まらなかったので、AIが話している間はマイクを止める設定にして、もう一度読み上げます');
+      speak(text,true);
+    }else{setSt('idle');show('sys','この端末では読み上げを始められませんでした')}
+  },2500);
+  setTimeout(()=>{if(my===spTok&&st!=='idle')speakDone(my)},5000+text.length*400);
+  parts.forEach((p,i)=>{
+    const u=new SpeechSynthesisUtterance(p);
+    u.lang='ja-JP';u.rate=Number(audioPrefs.rate)||1.05;u.pitch=Number(audioPrefs.pitch)||1;
+    if(selected)u.voice=selected;
+    if(i===0)u.onstart=()=>{if(my===spTok){clearTimeout(t0);setSt('speak')}};
+    if(i===parts.length-1)u.onend=()=>speakDone(my);
+    u.onerror=()=>{if(i===parts.length-1)speakDone(my)};
+    syn.speak(u);
+  });
+}
+
+$('bx').onclick=()=>{const t=$('tx');const o=t.style.display==='flex';t.style.display=o?'none':'flex';if(!o)$('ti').focus()};
+function sendText(){
+  const v=$('ti').value.trim();if(!v||st==='think')return;
+  $('ti').value='';
+  try{speechSynthesis.speak(new SpeechSynthesisUtterance(''))}catch(e){}
+  ask(v);
+}
+$('ts').onclick=sendText;
+$('ti').addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.isComposing)sendText()});
+
+/* 環境音（マイクの音に反応） */
+const cv=$('cv'),g=cv.getContext('2d');
+let W,H,D,an=null,fd=null,lv=0,micOn=false,ms=null,ac=null,wl=null;
+function rs(){D=Math.min(devicePixelRatio||1,2);W=innerWidth;H=innerHeight;cv.width=W*D;cv.height=H*D;g.setTransform(D,0,0,D,0,0)}
+addEventListener('resize',rs);rs();
+/* マイクエンジン: 一度の許可で開きっぱなし。声を見つけて録音→文字起こし→会話。AIが話している間に話すと、読み上げを止めて聞き取る */
+let proc=null,pre=[],buf=[],talking=false,vHi=0,vLo=0,sr=48000,nf=.005;
+async function micStart(){
+  /* 許可ダイアログより前（タップした瞬間）に、読み上げの解錠とAudioContextの開始をしておく */
+  try{speechSynthesis.speak(new SpeechSynthesisUtterance(''))}catch(e){}
+  ac=new (window.AudioContext||window.webkitAudioContext)();
+  try{ac.resume()}catch(e){}
+  try{
+    ms=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:audioPrefs.echo,noiseSuppression:audioPrefs.noise,autoGainControl:audioPrefs.gain,channelCount:1}});
+  }catch(e){try{ac.close()}catch(x){}ac=null;show('sys','マイクを使えません。ブラウザのマイク許可を確認してください');return}
+  await ac.resume();
+  sr=ac.sampleRate;
+  const src=ac.createMediaStreamSource(ms);
+  an=ac.createAnalyser();an.fftSize=256;an.smoothingTimeConstant=.75;fd=new Uint8Array(an.frequencyBinCount);
+  proc=ac.createScriptProcessor(4096,1,1);proc.onaudioprocess=onAudio;
+  const mute=ac.createGain();mute.gain.value=0;
+  src.connect(an);src.connect(proc);proc.connect(mute);mute.connect(ac.destination);
+  micOn=true;talking=false;pre=[];buf=[];setSt('idle');
+  try{wl=await navigator.wakeLock.request('screen')}catch(e){}
+}
+function micStop(){
+  talking=false;buf=[];pre=[];spTok++;
+  try{speechSynthesis.cancel()}catch(e){}
+  if(proc){proc.onaudioprocess=null;try{proc.disconnect()}catch(e){}}
+  if(ms)ms.getTracks().forEach(t=>t.stop());
+  if(ac)ac.close();
+  if(wl){try{wl.release()}catch(e){}}
+  proc=ms=ac=an=fd=wl=null;micOn=false;setSt('idle');
+}
+function onAudio(e){
+  if(st==='think'||performance.now()<hold)return;
+  const x=new Float32Array(e.inputBuffer.getChannelData(0));
+  let s=0;for(let i=0;i<x.length;i++)s+=x[i]*x[i];
+  const rms=Math.sqrt(s/x.length),dur=x.length/sr;
+  const base=Math.max(.008,nf*3)/Math.max(.6,Math.min(1.8,Number(audioPrefs.sensitivity)||1));
+  if(st==='idle'&&!talking&&rms<base)nf=nf*.97+rms*.03;
+  const speakingNow=st==='speak';
+  const hi=speakingNow?Math.max(.05,base*2.5):base;
+  if(!talking){
+    pre.push(x);if(pre.length>4)pre.shift();
+    vHi=rms>hi?vHi+dur:Math.max(0,vHi-dur);
+    if(vHi>=(speakingNow?.35:.12)){
+      talking=true;buf=pre.slice();pre=[];vHi=0;vLo=0;
+      if(speakingNow){spTok++;try{speechSynthesis.cancel()}catch(e){}}
+      setSt('listen');
+    }
+  }else{
+    buf.push(x);
+    vLo=rms>base*.7?0:vLo+dur;
+    if(vLo>=1||buf.length*dur>25)finishUtter();
+  }
+}
+async function finishUtter(){
+  talking=false;vLo=0;
+  const ch=buf;buf=[];
+  let n=0;ch.forEach(c=>n+=c.length);
+  if(n/sr<.6){setSt('idle');return}
+  setSt('think');
+  try{
+    const t=await stt(toWav(ch));
+    if(t.length<2||/ご視聴ありがとう|チャンネル登録/.test(t)){setSt('idle');return}
+    ask(t);
+  }catch(e){setSt('idle');show('sys',String(e.message||e))}
+}
+async function stt(wav,retry){
+  const h={'content-type':'application/octet-stream'};
+  const pw=store.get('pw','');if(pw)h['x-pass']=pw;
+  const res=await fetch('/api/stt',{method:'POST',headers:h,body:wav});
+  if(res.status===401&&!retry){
+    const p=prompt('合言葉を入力してください');
+    if(p){store.set('pw',p);return stt(wav,true)}
+  }
+  if(res.status===404)throw new Error('api/stt.js が見つかりません。GitHubのapiフォルダに追加してください');
+  const j=await res.json().catch(()=>({}));
+  if(!res.ok)throw new Error(j.error||('文字起こしエラー '+res.status));
+  return String(j.text||'').trim();
+}
+function toWav(ch){
+  let n=0;ch.forEach(c=>n+=c.length);
+  const all=new Float32Array(n);let o=0;ch.forEach(c=>{all.set(c,o);o+=c.length});
+  const r=sr/16000,m=Math.floor(n/r),pcm=new Int16Array(m);
+  for(let i=0;i<m;i++){
+    const a=Math.floor(i*r),b=Math.max(a+1,Math.floor((i+1)*r));let s=0;
+    for(let k=a;k<b&&k<n;k++)s+=all[k];
+    const v=Math.max(-1,Math.min(1,s/(b-a)));pcm[i]=v<0?v*32768:v*32767;
+  }
+  const w=new DataView(new ArrayBuffer(44+m*2)),T=(p,t)=>{for(let i=0;i<t.length;i++)w.setUint8(p+i,t.charCodeAt(i))};
+  T(0,'RIFF');w.setUint32(4,36+m*2,true);T(8,'WAVE');T(12,'fmt ');w.setUint32(16,16,true);
+  w.setUint16(20,1,true);w.setUint16(22,1,true);w.setUint32(24,16000,true);w.setUint32(28,32000,true);
+  w.setUint16(32,2,true);w.setUint16(34,16,true);T(36,'data');w.setUint32(40,m*2,true);
+  new Int16Array(w.buffer,44,m).set(pcm);
+  return w.buffer;
+}
+$('bk').onclick=()=>micOn?micStop():micStart();
+$('bg').onclick=()=>{barge=!barge;store.set('barge',barge);syncBg()};
+$('bs').onclick=()=>{$('voicePanel').classList.add('open');initAudioPanel()};
+$('voiceClose').onclick=()=>$('voicePanel').classList.remove('open');
+$('voicePanel').addEventListener('click',e=>{if(e.target===$('voicePanel'))$('voicePanel').classList.remove('open')});
+$('voiceSelect').onchange=()=>{audioPrefs.voiceURI=$('voiceSelect').value;saveAudioPrefs()};
+$('rate').oninput=()=>{audioPrefs.rate=Number($('rate').value);updateAudioLabels();saveAudioPrefs()};
+$('pitch').oninput=()=>{audioPrefs.pitch=Number($('pitch').value);updateAudioLabels();saveAudioPrefs()};
+$('sensitivity').oninput=()=>{audioPrefs.sensitivity=Number($('sensitivity').value);updateAudioLabels();saveAudioPrefs()};
+$('noiseToggle').onchange=()=>{audioPrefs.noise=$('noiseToggle').checked;saveAudioPrefs()};
+$('echoToggle').onchange=()=>{audioPrefs.echo=$('echoToggle').checked;saveAudioPrefs()};
+$('gainToggle').onchange=()=>{audioPrefs.gain=$('gainToggle').checked;saveAudioPrefs()};
+$('voiceEnabled').onchange=()=>{audioPrefs.enabled=$('voiceEnabled').checked;saveAudioPrefs();if(!audioPrefs.enabled){try{speechSynthesis.cancel()}catch(e){}}};
+$('voiceTest').onclick=()=>{try{speechSynthesis.cancel();const u=new SpeechSynthesisUtterance('こんにちは。音声設定のテストです。聞き取りやすいですか？');u.lang='ja-JP';u.rate=Number(audioPrefs.rate);u.pitch=Number(audioPrefs.pitch);const vv=speechSynthesis.getVoices().find(v=>v.voiceURI===audioPrefs.voiceURI)||speechSynthesis.getVoices().find(v=>v.lang&&v.lang.toLowerCase().startsWith('ja'));if(vv)u.voice=vv;speechSynthesis.speak(u);$('micStatus').textContent='音声テストを再生しています。'}catch(e){$('micStatus').textContent='音声を再生できませんでした。ブラウザの対応状況を確認してください。'}};
+$('micTest').onclick=async()=>{if(!navigator.mediaDevices?.getUserMedia){$('micStatus').textContent='このブラウザではマイク機能を利用できません。HTTPSで開いてください。';return}try{const test=await navigator.mediaDevices.getUserMedia({audio:{noiseSuppression:audioPrefs.noise,echoCancellation:audioPrefs.echo,autoGainControl:audioPrefs.gain}});const track=test.getAudioTracks()[0];const settings=track.getSettings?track.getSettings():{};$('micStatus').textContent='マイクは使用可能です。'+(settings.sampleRate?' サンプルレート '+settings.sampleRate+'Hz。':'')+' 設定変更はマイクを再起動すると反映されます。';test.getTracks().forEach(t=>t.stop())}catch(e){$('micStatus').textContent='マイクを利用できません。ブラウザのマイク許可とHTTPS接続を確認してください。'}};
+if(window.speechSynthesis){speechSynthesis.addEventListener?.('voiceschanged',refreshVoices);setTimeout(refreshVoices,300)}
+
+setInterval(()=>{
+  if(!micOn)return;
+  resumeAc();
+  if(ms&&ms.getAudioTracks().some(t=>t.readyState==='ended')){micStop();show('sys','マイクが切れました。もう一度「マイクON」を押してください');return}
+  if(st==='think'&&Date.now()-stSince>45000){setSt('idle');show('sys','返事が来なかったので待機に戻しました')}
+},1000);
+document.addEventListener('visibilitychange',resumeAc);
+syncBg();
+
+$('bt').onclick=()=>{ti=(ti+1)%THN.length;store.set('ti',ti);applyTheme()};
+$('bc').onclick=()=>{
+  const next=(ci+1)%(CITY.length+1);
+  if(next===CITY.length){
+    if(!navigator.geolocation){ci=0;store.set('ci',ci);weather();return}
+    navigator.geolocation.getCurrentPosition(
+      p=>{geo=[p.coords.latitude,p.coords.longitude];store.set('geo',geo);ci=next;store.set('ci',ci);weather()},
+      ()=>{ci=0;store.set('ci',ci);weather()},
+      {timeout:8000}
+    );
+  }else{ci=next;store.set('ci',ci);weather()}
+};
+
+/* 描画 */
+function ring(cx,cy,t,r,w,dash,sp,al,col){
+  g.save();g.translate(cx,cy);g.rotate(t*sp);g.beginPath();g.arc(0,0,r,0,7);
+  g.setLineDash(dash);g.lineWidth=w;g.globalAlpha=al;g.strokeStyle=col;g.stroke();g.restore();
+}
+function fr(ms_){
+  const t=ms_/1000,[c1,c2]=TH[THN[ti]];
+  g.clearRect(0,0,W,H);
+  let tl=0;
+  if(an&&(st==='idle'||st==='listen')){an.getByteFrequencyData(fd);let s=0;for(let i=0;i<48;i++)s+=fd[i];tl=Math.min(1,s/48/255*2.2)}
+  else if(st==='listen')tl=.25+.2*Math.abs(Math.sin(t*5)*Math.sin(t*2.3));
+  else if(st==='speak')tl=.3+.45*Math.abs(Math.sin(t*9)*Math.sin(t*3.1));
+  else if(st==='think')tl=.12+.1*Math.sin(t*6);
+  lv+=(tl-lv)*.25;
+  const spin=st==='think'?3:1;
+  const cx=W/2,cy=H*.37,R=Math.min(W*.4,H*.21),e=Math.min(1,lv+.06+.03*Math.sin(t*1.5));
+
+  const gr=g.createRadialGradient(cx,cy,0,cx,cy,R*.7);
+  gr.addColorStop(0,c2);gr.addColorStop(.3,c1);gr.addColorStop(1,'rgba(0,0,0,0)');
+  g.globalAlpha=.12+e*.55;g.fillStyle=gr;g.beginPath();g.arc(cx,cy,R*.7,0,7);g.fill();
+
+  ring(cx,cy,t,R*1.08,1.5,[2,7],.08*spin,.6,c1);
+  ring(cx,cy,t,R*.9,3,[R*.45,R*.14],-.25*spin,.5+e*.5,c1);
+  ring(cx,cy,t,R*.5,1.5,[4,5],.5*spin,.55,c2);
+  ring(cx,cy,t,R*.38,6,[R*.3,R*.1,R*.05,R*.1],.9*spin,.6+e*.4,c1);
+
+  const N=64;g.setLineDash([]);g.strokeStyle=c2;g.lineWidth=2.2;g.lineCap='round';
+  for(let i=0;i<N;i++){
+    const a=i/N*Math.PI*2-Math.PI/2,k=i<N/2?i:N-1-i;
+    const v=(fd&&(st==='idle'||st==='listen'))?fd[k*2]/255:(.05+lv*(.4+.6*Math.abs(Math.sin(t*8+k*.7))));
+    const r0=R*.62,r1=r0+R*.22*(v+.06);
+    g.globalAlpha=.35+v*.65;g.beginPath();
+    g.moveTo(cx+Math.cos(a)*r0,cy+Math.sin(a)*r0);
+    g.lineTo(cx+Math.cos(a)*r1,cy+Math.sin(a)*r1);g.stroke();
+  }
+
+  const T=36,lit=Math.round((lv*1.6+.12)*T);
+  g.strokeStyle=c1;g.lineWidth=3;
+  for(let i=0;i<T;i++){
+    const a=i/T*Math.PI*2-Math.PI/2,r0=R*1.14,r1=R*1.2;
+    g.globalAlpha=i<lit?.95:.18;g.beginPath();
+    g.moveTo(cx+Math.cos(a)*r0,cy+Math.sin(a)*r0);
+    g.lineTo(cx+Math.cos(a)*r1,cy+Math.sin(a)*r1);g.stroke();
+  }
+
+  g.fillStyle=c2;
+  for(let i=0;i<90;i++){
+    const a=i*2.399+t*(.05+(i%7)*.012),r=R*(.3+((i*37)%100)/100*1.0);
+    g.globalAlpha=.2+lv*.7;g.beginPath();
+    g.arc(cx+Math.cos(a)*r,cy+Math.sin(a)*r,1+lv*2.2,0,7);g.fill();
+  }
+
+  g.globalAlpha=.9;g.fillStyle=c2;g.font='700 15px ui-monospace,Menlo,monospace';
+  g.textAlign='center';g.textBaseline='middle';g.fillText('O R R E R Y',cx,cy);
+  g.globalAlpha=1;
+  requestAnimationFrame(fr);
+}
+if(window.speechSynthesis)speechSynthesis.getVoices();
+initAudioPanel();
+if(hist.length&&hist[hist.length-1].role==='user')hist.pop();
+applyTheme();setSt('idle');weather();setInterval(weather,600000);requestAnimationFrame(fr);
+</script>
+</body>
+</html>
