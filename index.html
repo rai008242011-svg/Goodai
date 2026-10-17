@@ -81,20 +81,19 @@ button:active,button.on{background:var(--c);color:#000}
       <button id="bx">文字</button>
       <button id="bv">設定</button>
       <button id="bt">テーマ</button>
-      <button id="bc">地点</button>
     </div>
   </div>
 </div>
 <script>
 const TH={ARC:['#33ddff','#a0f0ff'],EMBER:['#ff8a2a','#ffd49a'],MATRIX:['#2dff6a','#b8ffcc'],CRIMSON:['#ff2d55','#ffa0b2'],MONO:['#e6e6e6','#ffffff']};
 const THN=Object.keys(TH);
-const CITY=[['TOKYO',35.68,139.69],['OSAKA',34.69,135.5],['NAGOYA',35.18,136.91],['SAPPORO',43.06,141.35],['FUKUOKA',33.59,130.4]];
+const CITY=[['FUKUI',36.07,136.22]];
 const $=id=>document.getElementById(id);
 const store={
   get(k,d){try{const v=localStorage.getItem(k);return v===null?d:JSON.parse(v)}catch(e){return d}},
   set(k,v){try{localStorage.setItem(k,JSON.stringify(v))}catch(e){}}
 };
-let ti=store.get('ti',0)%THN.length, ci=store.get('ci',0), geo=store.get('geo',null);
+let ti=store.get('ti',0)%THN.length, ci=0, geo=store.get('geo',null);
 if(ci>CITY.length||(ci===CITY.length&&!geo))ci=0;
 
 function applyTheme(){
@@ -406,17 +405,6 @@ if(window.speechSynthesis)speechSynthesis.onvoiceschanged=fillVoices;
 fillVoices();
 
 $('bt').onclick=()=>{ti=(ti+1)%THN.length;store.set('ti',ti);applyTheme()};
-$('bc').onclick=()=>{
-  const next=(ci+1)%(CITY.length+1);
-  if(next===CITY.length){
-    if(!navigator.geolocation){ci=0;store.set('ci',ci);weather();return}
-    navigator.geolocation.getCurrentPosition(
-      p=>{geo=[p.coords.latitude,p.coords.longitude];store.set('geo',geo);ci=next;store.set('ci',ci);weather()},
-      ()=>{ci=0;store.set('ci',ci);weather()},
-      {timeout:8000}
-    );
-  }else{ci=next;store.set('ci',ci);weather()}
-};
 
 /* 描画 */
 function ring(cx,cy,t,r,w,dash,sp,al,col){
