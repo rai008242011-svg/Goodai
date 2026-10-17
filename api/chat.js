@@ -1,6 +1,6 @@
-// Vercel サーバー関数: /api/chat （Groq版・ウェブ検索つき）
-// 環境変数: GROQ_API_KEY (必須) / APP_PASSCODE (任意の合言葉) / GROQ_MODEL (任意)
-// gpt-oss モデルの内蔵ウェブ検索(browser_search)を使います。失敗したら検索なしに切り替えます。
+// Vercel サーバー関数: /api/chat
+// GEMINI_API_KEY があれば gemini-3.5-flash-lite（Google検索つき）、なければ（または失敗したら）Groqを使います。
+// 環境変数: GEMINI_API_KEY / GROQ_API_KEY / APP_PASSCODE / GEMINI_MODEL / GROQ_MODEL
 
 const SYSTEM = [
   'あなたはORRERYという音声対話アシスタントです。ユーザーとは声で会話しています。',
@@ -52,6 +52,27 @@ async function callGroq(key, model, system, msgs, tools) {
   return text;
 }
 
+async function viaGemini(key, system, msgs, search) {
+  const model = process.env.GEMINI_MODEL || 'gemini-3.5-flash-lite';
+  const body = {
+    systemInstruction: { parts: [{ text: system }] },
+    contents: msgs.map(m => ({ role: m.role === 'assistant' ? 'model' : 'user', parts: [{ text: m.content }] })),
+    generationConfig: { maxOutputTokens: 1500, temperature: 0.7 }
+  };
+  if (search) body.tools = [{ google_search: {} }];
+  const r = await fetch('https://generativelanguage.googleapis.com/v1beta/models/' + model + ':generateContent', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', 'x-goog-api-key': key },
+    body: JSON.stringify(body)
+  });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error((j.error && j.error.message) || ('Gemini エラー ' + r.status));
+  const parts = (((j.candidates || [])[0] || {}).content || {}).parts || [];
+  const text = clean(parts.map(p => p.text || '').join(''));
+  if (!text) throw new Error('返事が空でした');
+  return { reply: text, model: model + (search ? '（検索あり）' : '（検索なし）') };
+}
+
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
     res.status(405).json({ error: 'POSTだけ使えます' });
@@ -64,9 +85,9 @@ export default async function handler(req, res) {
     return;
   }
 
-  const key = process.env.GROQ_API_KEY;
-  if (!key) {
-    res.status(500).json({ error: 'GROQ_API_KEY が未設定です（Vercelの環境変数に追加して再デプロイ）' });
+  const gk = process.env.GEMINI_API_KEY, qk = process.env.GROQ_API_KEY;
+  if (!gk && !qk) {
+    res.status(500).json({ error: 'GEMINI_API_KEY か GROQ_API_KEY が未設定です（Vercelの環境変数に追加して再デプロイ）' });
     return;
   }
 
@@ -87,15 +108,24 @@ export default async function handler(req, res) {
   }
 
   const system = SYSTEM + (body.context ? '\n\n現在の状況: ' + String(body.context).slice(0, 400) : '');
-  const primary = process.env.GROQ_MODEL || FALLBACK;
-  const tries = [[primary, true], [FALLBACK, true], [FALLBACK, false]]
-    .filter((t, i, a) => a.findIndex(u => u[0] === t[0] && u[1] === t[1]) === i);
+
+  const attempts = [];
+  if (gk) {
+    attempts.push(() => viaGemini(gk, system, msgs, true));
+    attempts.push(() => viaGemini(gk, system, msgs, false));
+  }
+  if (qk) {
+    const m = process.env.GROQ_MODEL || FALLBACK;
+    const oss = m.startsWith('openai/gpt-oss');
+    attempts.push(async () => ({ reply: await callGroq(qk, m, system, msgs, oss), model: m + (oss ? '（Groq・検索あり）' : '（Groq）') }));
+    attempts.push(async () => ({ reply: await callGroq(qk, FALLBACK, system, msgs, false), model: FALLBACK + '（Groq・検索なし）' }));
+  }
+
   let firstErr = '';
-  for (const [model, tools] of tries) {
-    const useTools = tools && model.startsWith('openai/gpt-oss');
+  for (const run of attempts) {
     try {
-      const reply = await callGroq(key, model, system, msgs, useTools);
-      res.status(200).json({ reply, model: model + (useTools ? '（検索あり）' : '（検索なし）') });
+      const out = await run();
+      res.status(200).json(out);
       return;
     } catch (e) {
       if (!firstErr) firstErr = String(e.message || e);
